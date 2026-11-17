@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="INKLINE：墨线突围——纸笔世界 FPS 网页原型。画线造掩体、擦除破防御，锚定三处装订锚点后撤离。单文件、离线可玩。">
+<title>INKLINE：墨线突围</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23F3F1E7'/%3E%3Cpath d='M10 48L48 10M14 14h36v36H14z' stroke='%2320242A' stroke-width='5' fill='none'/%3E%3Cpath d='M18 46L46 18' stroke='%23007F7B' stroke-width='6'/%3E%3C/svg%3E">
+<style>
+/*{{CSS}}*/
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" aria-label="墨线突围 3D 游戏画面"></canvas>
+<button id="soundBtn" role="switch" aria-checked="false" aria-label="切换声音">声音 关</button>
+
+<div id="topHud" class="hud">
+  <div id="objective" class="hud-block">装订锚点 0 / 3<small>启动全部锚点后撤离</small></div>
+  <div id="timer" class="hud-block">04:00</div>
+</div>
+<div id="bossBar" class="hud" hidden>
+  <div id="bossBarInner"><b>涂改大王</b><div class="meter boss"><i id="bossFill"></i></div></div>
+</div>
+<div id="crosshair" class="hud"></div>
+<div id="bottomHud" class="hud">
+  <div class="hud-block"><b>生命 <span id="hpText">100</span></b><div class="meter hp"><i id="hpFill"></i></div></div>
+  <div class="hud-block"><b>墨量 <span id="inkText">100</span></b><div class="meter"><i id="inkFill"></i></div></div>
+  <div id="ammo" class="hud-block"><span id="ammoText">18 / ∞</span><small id="weaponState">线规笔 · 半自动墨点</small></div>
+</div>
+<div id="prompt" class="hud" hidden><div class="prompt-box"><span id="promptText"></span><div id="useTrack" hidden><i id="useFill"></i></div></div></div>
+<div id="drawHint" class="hud" hidden>Q 确定终点 · 右键取消</div>
+<div id="toast" class="hud" role="status"></div>
+<div id="damage" class="hud"></div>
+<div id="navLayer" class="hud" aria-hidden="true"></div>
+
+<div id="touchUI">
+  <div id="movePad" class="touch-zone" aria-label="移动摇杆"><div id="moveThumb"></div></div>
+  <div id="lookPad" class="touch-zone" aria-label="滑动瞄准区域"></div>
+  <div class="touch-actions">
+    <button class="fire" id="touchFire">射击</button>
+    <button id="touchWall">画线</button>
+    <button id="touchErase">擦除</button>
+    <button class="use" id="touchUse">交互</button>
+    <button id="touchReload">换弹</button>
+    <button id="touchFold">折纸</button>
+    <button id="touchJump">跳跃</button>
+    <button id="touchPause">暂停</button>
+  </div>
+</div>
+
+<section id="menu" class="overlay">
+  <div class="sheet menu-grid">
+    <div>
+      <h1 class="brand">INKLINE<span>墨线突围</span></h1>
+      <p class="tagline">别只开枪。<br>把战场重新画一遍。</p>
+      <p class="micro">原创纸笔世界 FPS 原型 · 单局约 4 分钟<br>无需安装 · 内置 3D 引擎 · 完全离线可玩 · 不读取或上传任何个人数据</p>
+    </div>
+    <div class="mission">
+      <h2>你的修订任务</h2>
+      <p>失控的涂改灵正在覆盖这张工作页。穿过火力，重新锚定纸页，然后从南侧裁切线撤离。</p>
+      <ol class="objective-list">
+        <li><b>1</b><span><strong>画线</strong>造出临时掩体，切断敌人视线；<strong>折纸</strong>（<span class="key">C</span>）切换坡道与纸墙。</span></li>
+        <li><b>2</b><span><strong>擦除</strong>红色护甲，再用线规笔清理目标。小心啃墙的橡皮擦虫与越墙的纸飞机。</span></li>
+        <li><b>3</b><span>启动 <strong>3 处装订锚点</strong>，拾取墨水瓶与胶带补充状态。</span></li>
+        <li><b>4</b><span>击败 <strong>涂改大王</strong>，从南侧裁切线撤离。</span></li>
+      </ol>
+      <div class="actions"><button id="startBtn" class="primary">进入纸页</button><button id="howBtn" aria-expanded="false">操作说明</button><button id="settingsBtn">设置</button></div>
+      <div id="howPanel" hidden>
+        <div id="desktopHelp"><span class="key">WASD</span> 移动，鼠标瞄准，左键射击，<span class="key">Shift</span> 冲刺，<span class="key">Space</span> 跳跃。<br><span class="key">Q</span> 标记画线起点，再按一次生成掩体；右键取消。<br><span class="key">C</span> 翻折附近的折纸坡道 / 纸墙。<span class="key">E</span> 擦除近处敌人护甲，<span class="key">F</span> 按住交互，<span class="key">R</span> 换弹，<span class="key">Esc</span> 暂停。</div>
+        <div id="touchHelp" hidden>左侧摇杆移动，右侧区域滑动瞄准。使用右侧按钮射击、两次标记画线、擦除、折纸、按住交互、换弹和跳跃。</div>
+        <p class="micro">提示：护甲对子弹抗性极高（每发仅削 3 点护甲）。先擦除，再开火；擦除还会短暂减速敌人。</p>
+      </div>
+      <p id="loadError" hidden></p>
+      <p class="micro">建议电脑 Chrome / Edge。<br>若鼠标锁定不可用，会自动进入兼容模式：移动鼠标瞄准，左键射击。<br>灵敏度、音量与视野可在“设置”中调整，设置会保存在本机浏览器。</p>
+    </div>
+    <div class="corner-note">kill the blank, not the paper.</div>
+  </div>
+</section>
+
+<section id="pauseOverlay" class="overlay" hidden>
+  <div class="sheet compact"><h1>纸页夹住了</h1><p>战斗与倒计时均已暂停。</p><div class="actions"><button id="resumeBtn" class="primary">继续修订</button><button id="pauseSettingsBtn">设置</button><button id="pauseRestartBtn">重新开始</button></div></div>
+</section>
+
+<section id="settingsOverlay" class="overlay" hidden>
+  <div class="sheet compact">
+    <h1>修订设置</h1>
+    <div class="setting-row">
+      <label for="sensSlider">鼠标灵敏度</label><output id="sensVal">1.00×</output>
+      <input id="sensSlider" type="range" min="30" max="200" step="5" value="100">
+    </div>
+    <div class="setting-row" id="touchSensRow" hidden>
+      <label for="touchSensSlider">触屏灵敏度</label><output id="touchSensVal">1.00×</output>
+      <input id="touchSensSlider" type="range" min="30" max="200" step="5" value="100">
+    </div>
+    <div class="setting-row">
+      <label for="volSlider">音量</label><output id="volVal">35%</output>
+      <input id="volSlider" type="range" min="0" max="100" step="5" value="35">
+    </div>
+    <div class="setting-row">
+      <label for="fovSlider">视野（FOV）</label><output id="fovVal">68</output>
+      <input id="fovSlider" type="range" min="60" max="95" step="1" value="68">
+    </div>
+    <p class="micro">设置自动保存到本机浏览器，不上传任何数据。</p>
+    <div class="actions"><button id="settingsBackBtn" class="primary">返回</button></div>
+  </div>
+</section>
+
+<section id="endOverlay" class="overlay" hidden>
+  <div class="sheet compact"><h1 id="endTitle">修订完成</h1><p id="endReason"></p><div class="stats"><div class="stat"><b id="statTime">0:00</b>用时</div><div class="stat"><b id="statKills">0</b>消灭</div><div class="stat"><b id="statWalls">0</b>画墙</div><div class="stat"><b id="statErases">0</b>擦除</div></div><p id="bestLine" class="micro" hidden></p><div class="actions"><button id="restartBtn" class="primary">重新修订</button></div></div>
+</section>
+
+<script>
+/*{{THREE_ENGINE}}*/
+</script>
+<script>
+/*{{MODEL_DATA}}*/
+</script>
+<script>
+/*{{GAME_JS}}*/
+</script>
+</body>
+</html>
