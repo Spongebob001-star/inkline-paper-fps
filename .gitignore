@@ -1,0 +1,33 @@
+# OS & Editor
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+.vscode/
+.idea/
+
+# Dependencies & temp builds
+node_modules/
+__pycache__/
+*.pyc
+*.tmp
+*.bak
+
+# Heavy intermediate Blender / modeling dumps (final game GLBs live in src/models/)
+N5-Open/
+
+# Raw promotional MP4 videos (archived in GitHub Releases v1.0.0)
+promo/*.mp4
+promo/INKLINE-Cover-9x16.png
+
+# Third-party reference & bulk raw reference frames
+reference/
+docs/screenshots/nailong/
+docs/reports/n5-thirdparty-audit.json
+
+# Local draft & multi-agent handoff scratchpads (contain local paths / personal draft notes)
+docs/FORUM-POST-DRAFT.md
+HANDOFF-MAIN.md
+HANDOFF-SHARED.md
+STATUS-MAIN.md
+STATUS-SUB.md

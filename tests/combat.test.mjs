@@ -138,17 +138,18 @@ test('losBlocker：墙后视线被挡，返回墙引用与命中点', () => {
   assert.ok(Math.abs(b.point.z - (-9)) < 0.2);
 });
 
-test('Boss 护盾：常态 ceil(24×0.35)=9，狂暴后全额 24', () => {
+test('Boss 护盾：阶段 1 ceil(24×0.40)=10，暴走阶段 0.72', () => {
   const m = createMatch();
   createBoss(m);
-  assert.equal(damageBoss(m, 24), 9);
-  assert.equal(m.boss.hp, 471);
-  m.boss.hp = 240; // ≤50%
-  damageBoss(m, 24);
+  assert.equal(damageBoss(m, 24), 10);
+  assert.equal(m.boss.hp, m.boss.maxHp - 10);
+  m.boss.hp = m.boss.maxHp * CONFIG.boss.phase2At; // =65%，跨入阶段 2
+  damageBoss(m, 2);
   assert.equal(m.boss.raged, true);
+  assert.equal(m.boss.phase, 2);
   const before = m.boss.hp;
-  assert.equal(damageBoss(m, 24), 24);
-  assert.equal(m.boss.hp, before - 24);
+  assert.equal(damageBoss(m, 24), Math.ceil(24 * 0.72));
+  assert.equal(m.boss.hp, before - Math.ceil(24 * 0.72));
 });
 
 test('Boss 死亡解锁出口', () => {
@@ -167,7 +168,7 @@ test('射击命中 Boss 走护盾结算', () => {
   m.boss.x = 0; m.boss.z = -5;
   const r = shoot(m);
   assert.equal(r.kind, 'boss');
-  assert.equal(m.boss.hp, 471);
+  assert.equal(m.boss.hp, m.boss.maxHp - 10);
 });
 
 test('墙耐久归零死亡并事件', () => {

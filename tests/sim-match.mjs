@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import CONFIG from '../shared/config.mjs';
 import { createMatch, snapshot, stepMatch } from '../shared/sim.mjs';
 import { createRuntime } from '../host/runtime.mjs';
-import { createEnemy } from '../shared/enemies.mjs';
+import { spawnInitialEnemies } from '../shared/flow.mjs';
 import { losBlocker, HITBOX } from '../shared/combat.mjs';
 import { ANCHORS, EXIT, groundHeightAt } from '../shared/world.mjs';
 
@@ -32,7 +32,7 @@ function aimDir(p) {
 }
 const center = e => ({ x: e.x, y: e.type === 'plane' ? e.y : 0.75, z: e.z });
 
-function botTick(rt, p, bs) {
+function botTick(rt, p, bs, rescueDown = null) {
   const m = rt.match;
   const it = { f: 0, r: 0, sprint: false, jump: false, hold: false };
   const moved = Math.hypot(p.pos.x - bs.lx, p.pos.z - bs.lz);
@@ -49,7 +49,16 @@ function botTick(rt, p, bs) {
   const threat = enemy && ed < 13 && clear(center(enemy));
   let aim = null;
   const fight = () => { if (enemy && clear(center(enemy))) aim = center(enemy); };
-  if (m.exitUnlocked) {
+  // D7 救援优先：最近存活者前往倒地队友 1.5m 内按住 F（2s）；其余人继续目标
+  if (rescueDown) {
+    const rd = dist(p, rescueDown);
+    if (rd <= CONFIG.player.down.reviveRange - 0.2) {
+      it.hold = true;
+      aimAt(p, { x: rescueDown.pos.x, y: rescueDown.pos.y, z: rescueDown.pos.z });
+    } else {
+      steer(it, p, rescueDown);
+    }
+  } else if (m.exitUnlocked) {
     if (dist(p, EXIT) < 1.8 && !threat) it.hold = true;
     else if (threat) fight();
     else steer(it, p, EXIT);
@@ -76,7 +85,7 @@ function botTick(rt, p, bs) {
     rt.action(p.id, { m: 'erase' });
   }
   // 换弹期撤离：背向看得见的敌人冲刺，躲墨弹（掩体后的敌人打不到，无需躲）
-  if (p.reload > 0 && enemy && clear(center(enemy))) {
+  if (!rescueDown && p.reload > 0 && enemy && clear(center(enemy))) {
     aim = null;
     const dx = p.pos.x - enemy.x, dz = p.pos.z - enemy.z;
     p.yaw = Math.atan2(-dx, -dz);
@@ -116,16 +125,26 @@ function runMatch(n, s) {
   const rt = createRuntime({ seed: s, playerIds: ids });
   const m = rt.match;
   const initial = JSON.stringify(snapshot(m));
-  for (let i = 0; i < CONFIG.scaling[n].initial; i++) {
-    const type = CONFIG.waves.initial[i % CONFIG.waves.initial.length];
-    const [x, z] = CONFIG.waves.spots[i % CONFIG.waves.spots.length];
-    createEnemy(m, type, x, z, { spawnAnim: true });
-  }
+  spawnInitialEnemies(m); // 规格 §3.9：开局 4/6/8/10 + 构成 3+1 / 4+2 / 6+2 / 7+3
   const log = [];
   const bs = new Map(ids.map(id => [id, { stuck: 0, avoid: 0, side: 1, lx: 0, lz: 0 }]));
   let lastPhase = m.phase;
   while (m.phase !== 'won' && m.phase !== 'lost' && m.tick < 20000) {
-    for (const p of m.players) if (p.st === 0) botTick(rt, p, bs.get(p.id));
+    // 倒地队友：最近的存活机器人去救（按住 F 2s），其余继续推进目标
+    const downed = m.players.find(q => q.st === 1);
+    let rescueId = null;
+    if (downed) {
+      let best = null, bd = Infinity;
+      for (const q of m.players) {
+        if (q.st !== 0) continue;
+        const d = dist(q, downed);
+        if (d < bd) { bd = d; best = q; }
+      }
+      rescueId = best ? best.id : null;
+    }
+    for (const p of m.players) {
+      if (p.st === 0) botTick(rt, p, bs.get(p.id), rescueId === p.id ? downed : null);
+    }
     rt.tickOnce();
     if (m.phase !== lastPhase) { log.push([m.tick, m.phase]); lastPhase = m.phase; }
   }

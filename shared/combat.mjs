@@ -2,8 +2,9 @@
 // 命中面与原型 solidMeshes 一致：掩体+围墙+平台+玩家墙+折纸墙（平台仅豁免玩家碰撞）。
 import CONFIG from './config.mjs';
 import { rayVsAABB, rayVsOBB, rayVsCylinder, aabbOf } from './math.mjs';
-import { applyFire } from './sim.mjs';
+import { applyFire, weaponOf } from './sim.mjs';
 import { damageBoss } from './boss.mjs';
+import { perkMods } from './perks.mjs';
 
 // 圆柱 hitbox 等价原型模型轮廓：规格约束半径，高度取原型几何。
 // 橡皮擦虫高度 .87 / 纸飞机厚度 ±.15 由 D5 模型包围盒核定；飞机 hitbox 随 e.y 动态（dy）。
@@ -54,14 +55,34 @@ export function losBlocker(match, from, to) {
   return best;
 }
 
-// favor-the-shooter：客机报射线，房主校验后权威结算（不信任客机命中结果）
-export function applyShot(match, shooterId, origin, dir) {
-  const p = match.players.find(pl => pl.id === shooterId);
-  if (!p || p.st !== 0) return { ok: false, reason: 'dead' };
-  const gate = applyFire(p);
-  if (gate !== 'fired') return { ok: false, reason: gate };
+// Uniform disk offsets in an orthonormal cone basis, including vertical aim.
+function pelletDirections(match, dir, w) {
   const d = norm(dir);
-  const range = CONFIG.player.gun.range;
+  const dirs = [d];
+  if (w.pellets <= 1) return dirs;
+  const right = Math.abs(d.y) < 0.999
+    ? norm({ x: d.z, y: 0, z: -d.x })
+    : norm({ x: 0, y: -d.z, z: d.y });
+  const up = {
+    x: d.y * right.z - d.z * right.y,
+    y: d.z * right.x - d.x * right.z,
+    z: d.x * right.y - d.y * right.x,
+  };
+  for (let i = 1; i < w.pellets; i++) {
+    const radius = Math.sqrt(match.rand()) * w.spread;
+    const angle = match.rand() * Math.PI * 2;
+    const r = Math.cos(angle) * radius;
+    const u = Math.sin(angle) * radius;
+    dirs.push(norm({
+      x: d.x + right.x * r + up.x * u,
+      y: d.y + right.y * r + up.y * u,
+      z: d.z + right.z * r + up.z * u,
+    }));
+  }
+  return dirs;
+}
+
+function tracePellet(match, origin, d, range) {
   let best = { t: range, kind: 'none', point: { x: origin.x + d.x * range, y: origin.y + d.y * range, z: origin.z + d.z * range } };
   const consider = (t, kind, ref) => {
     if (t !== null && t > 0.05 && t < best.t) {
@@ -92,15 +113,22 @@ export function applyShot(match, shooterId, origin, dir) {
     consider(rayVsCylinder(origin, d, { x: b.x, z: b.z, r: CONFIG.boss.radius, y0: 0, y1: 2.2 }), 'boss', b);
   }
 
+  return best;
+}
+
+function resolvePellet(match, p, w, best, mods) {
   if (best.kind === 'enemy') {
     const e = best.ref;
+    const dealt = e.armor > 0 ? Math.min(e.armor, w.armorDamage) : w.damage;
     if (e.armor > 0) {
-      e.armor = Math.max(0, e.armor - CONFIG.player.gun.armorDamage);
+      e.armor = Math.max(0, e.armor - w.armorDamage);
       if (e.armor === 0) match.events.push({ type: 'armorStrip', data: { id: e.id } });
     } else {
-      e.hp -= CONFIG.player.gun.damage;
+      e.hp -= w.damage;
     }
-    match.events.push({ type: 'hit', data: { id: e.id, point: best.point, armored: e.armor > 0 } });
+    const data = { id: e.id, point: best.point, armored: e.armor > 0 };
+    if (w.id !== 'pen' || p.perks?.length) data.dealt = dealt;
+    match.events.push({ type: 'hit', data });
     if (e.hp <= 0) {
       e.dead = true;
       match.kills++;
@@ -108,13 +136,63 @@ export function applyShot(match, shooterId, origin, dir) {
       match.events.push({ type: 'kill', data: { id: e.id, enemyType: e.type } });
     }
   } else if (best.kind === 'boss') {
-    damageBoss(match, CONFIG.player.gun.damage);
-    match.events.push({ type: 'hit', data: { id: match.boss.id, point: best.point, boss: true } });
+    const b = best.ref;
+    const hitY = best.point.y;
+    let critKind = null;
+    let opts = null;
+    if (b.stunT > 0) {
+      critKind = 'stun';
+      opts = { bypassShield: true, mul: CONFIG.boss.weakpointMul };
+    } else if (b.laughExposeT > 0 && hitY >= CONFIG.boss.bellyMinY && hitY <= CONFIG.boss.bellyMaxY) {
+      critKind = 'belly';
+      opts = { bypassShield: true, mul: CONFIG.boss.weakpointMul };
+    } else if (hitY >= CONFIG.boss.headshotY) {
+      critKind = 'head';
+      opts = { bypassShield: false, mul: CONFIG.boss.headshotMul };
+    }
+    if (mods.shieldMulOverride !== null) opts = { ...opts, shieldMulOverride: mods.shieldMulOverride };
+    const dealt = damageBoss(match, w.damage, p.id, opts);
+    match.events.push({ type: 'hit', data: { id: b.id, point: best.point, boss: true, dealt, crit: critKind !== null, critKind } });
   } else if (best.kind !== 'none') {
-    match.events.push({ type: 'impact', data: { point: best.point, kind: best.kind, wallId: best.ref ? best.ref.id : null } });
+    const data = { point: best.point, kind: best.kind, wallId: best.ref ? best.ref.id : null };
+    if (w.pellets > 1) data.shooterId = p.id;
+    match.events.push({ type: 'impact', data });
   }
-  match.events.push({ type: 'shot', data: { id: shooterId, end: best.point, kind: best.kind } });
-  return { ok: true, kind: best.kind, end: best.point };
+}
+
+function shotKindRank(kind) {
+  return kind === 'enemy' || kind === 'boss' ? 2 : kind === 'none' ? 0 : 1;
+}
+
+// favor-the-shooter：客机报射线，房主校验后权威结算（不信任客机命中结果）
+export function applyShot(match, shooterId, origin, dir) {
+  const p = match.players.find(pl => pl.id === shooterId);
+  if (!p || p.st !== 0) return { ok: false, reason: 'dead' };
+  const gate = applyFire(p);
+  if (gate !== 'fired') return { ok: false, reason: gate };
+  const mods = perkMods(p);
+  const baseWeapon = weaponOf(p);
+  // Scale once per shot; damageBoss only applies shield/critical modifiers.
+  const w = mods.dmgMul === 1 && mods.armorDmgMul === 1 ? baseWeapon : {
+    ...baseWeapon,
+    damage: baseWeapon.damage * mods.dmgMul,
+    armorDamage: baseWeapon.armorDamage * mods.armorDmgMul,
+  };
+  const ends = [];
+  let bestKind = 'none';
+  for (const d of pelletDirections(match, dir, w)) {
+    const best = tracePellet(match, origin, d, w.range);
+    resolvePellet(match, p, w, best, mods);
+    ends.push(best.point);
+    if (shotKindRank(best.kind) > shotKindRank(bestKind)) bestKind = best.kind;
+  }
+  const end = ends[0];
+  if (w.pellets > 1) {
+    match.events.push({ type: 'shot', data: { id: shooterId, end, ends, weapon: p.weapon, kind: bestKind } });
+    return { ok: true, kind: bestKind, end, ends };
+  }
+  match.events.push({ type: 'shot', data: { id: shooterId, end, kind: bestKind } });
+  return { ok: true, kind: bestKind, end };
 }
 
 export function fireProjectile(match, from, to, speed, damage) {
@@ -148,10 +226,15 @@ export function damageWall(match, w, dmg) {
   }
 }
 
-export function damagePlayer(match, p, dmg) {
-  if (p.st !== 0) return;
+export function damagePlayer(match, p, dmg, source = null) {
+  if (p.st !== 0 || p.god) return;
   p.hp = Math.max(0, p.hp - dmg);
-  match.events.push({ type: 'playerHit', data: { id: p.id, dmg, hp: p.hp } });
+  const data = { id: p.id, dmg, hp: p.hp };
+  if (source && Number.isFinite(source.x) && Number.isFinite(source.z)) {
+    data.sx = +source.x.toFixed(2);
+    data.sz = +source.z.toFixed(2);
+  }
+  match.events.push({ type: 'playerHit', data });
   if (p.hp === 0) {
     p.st = 1;
     match.events.push({ type: 'downed', data: { id: p.id } });
@@ -200,7 +283,7 @@ export function stepProjectiles(match, dt) {
         if (pl.st !== 0) continue;
         const dx = p.x - pl.pos.x, dz = p.z - pl.pos.z;
         if (Math.abs(p.y - (pl.pos.y - 0.35)) < 0.55 && dx * dx + dz * dz < 0.45 * 0.45) {
-          damagePlayer(match, pl, p.damage);
+          damagePlayer(match, pl, p.damage, { x: p.x - p.vx * 0.2, z: p.z - p.vz * 0.2 });
           hit = true;
           break;
         }

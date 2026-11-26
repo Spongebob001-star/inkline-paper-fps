@@ -3,18 +3,19 @@
 import CONFIG from './config.mjs';
 import { pointSegmentDistance } from './math.mjs';
 import { useInk } from './sim.mjs';
+import { perkMods } from './perks.mjs';
 
 const CLAMP = 16.5; // 原型 aimGround 端点钳制
 const clampPt = p => ({ x: Math.max(-CLAMP, Math.min(CLAMP, p.x)), z: Math.max(-CLAMP, Math.min(CLAMP, p.z)) });
 
-export function drawCost(len) {
-  return CONFIG.ink.drawBase + CONFIG.ink.drawPerMeter * len;
+export function drawCost(len, p) {
+  return (CONFIG.ink.drawBase + CONFIG.ink.drawPerMeter * len) * perkMods(p).drawCostMul;
 }
 
 export function validateDraw(match, p, a, b) {
   const A = clampPt(a), B = clampPt(b);
   const len = Math.hypot(B.x - A.x, B.z - A.z);
-  const cost = drawCost(len);
+  const cost = drawCost(len, p);
   const base = { len, cost, a: A, b: B };
   if (len < CONFIG.ink.drawMinLen) return { ok: false, reason: 'short', ...base };
   if (len > CONFIG.ink.drawMaxLen) return { ok: false, reason: 'long', ...base };
@@ -29,13 +30,15 @@ export function applyDraw(match, playerId, a, b) {
   const v = validateDraw(match, p, a, b);
   if (!v.ok) return v;
   useInk(p, v.cost, match.elapsed);
+  const mods = perkMods(p);
+  if (mods.wallHeal > 0) p.hp = Math.min(CONFIG.player.maxHp, p.hp + mods.wallHeal);
   const dx = (v.b.x - v.a.x) / v.len, dz = (v.b.z - v.a.z) / v.len;
   const w = {
     id: match.nextId++,
     x: (v.a.x + v.b.x) / 2, z: (v.a.z + v.b.z) / 2,
     len: v.len, ux: dx, uz: dz, nx: -dz, nz: dx,
     halfThickness: CONFIG.wall.halfThickness,
-    hp: CONFIG.wall.hp, life: CONFIG.wall.lifetime,
+    hp: CONFIG.wall.hp * mods.wallHpMul, life: CONFIG.wall.lifetime + mods.wallLifeAdd,
     owner: p.id, dead: false,
   };
   match.walls.push(w);

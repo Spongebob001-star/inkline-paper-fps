@@ -55,7 +55,7 @@ test('斜向输入归一：对角移动不快于直线', () => {
   near(Math.hypot(p.velX, p.velZ), 4.8, 0.02);
 });
 
-test('跳跃：离地 → 顶点约 0.8–0.96m → 落回地面', () => {
+test('跳跃：离地 → 顶点约 0.95–1.02m（可跃过 0.95m 音浪）→ 落回地面', () => {
   const c = ctx();
   const p = createPlayer(0, { x: 0, z: -13 });
   stepPlayer(p, { jump: true }, DT, c);
@@ -67,7 +67,7 @@ test('跳跃：离地 → 顶点约 0.8–0.96m → 落回地面', () => {
     apex = Math.max(apex, p.pos.y - 1.65);
     if (p.grounded && i > 5) break;
   }
-  assert.ok(apex > 0.75 && apex < 0.97, `apex=${apex}`);
+  assert.ok(apex >= 0.95 && apex < 1.02, `apex=${apex}`);
   assert.equal(p.grounded, true);
   near(p.pos.y, 1.65);
 });

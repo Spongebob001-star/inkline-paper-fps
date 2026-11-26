@@ -1,13 +1,14 @@
 // 房主权威运行时：20Hz 固定步累积器（规格 §4.1）。
 // 同一份代码跑在浏览器（联机房主/单人本地）与 Node（无头回归）。
 import CONFIG from '../shared/config.mjs';
-import { createMatch, stepMatch, snapshot, startReload } from '../shared/sim.mjs';
+import { createMatch, stepMatch, snapshot, startReload, switchWeapon } from '../shared/sim.mjs';
 import { applyShot } from '../shared/combat.mjs';
 import { applyDraw } from '../shared/walls.mjs';
 import { applyErase } from '../shared/erase.mjs';
 import { applyFold } from '../shared/folds.mjs';
+import { applyPerk, perkMods } from '../shared/perks.mjs';
 
-export function createRuntime({ seed = 1, playerIds = [0], onSnapshot = null } = {}) {
+export function createRuntime({ seed = 1, playerIds = [0], onSnapshot = null, onBeforeStep = null } = {}) {
   const match = createMatch({ seed, playerIds });
   const inputs = {};
   let acc = 0;
@@ -36,10 +37,19 @@ export function createRuntime({ seed = 1, playerIds = [0], onSnapshot = null } =
         return applyShot(match, id, origin, { x: msg.dx, y: msg.dy, z: msg.dz });
       }
       if (msg.m === 'reload') return { ok: startReload(p) };
-      if (msg.m === 'drawStart') return { ok: p.ink >= CONFIG.ink.minDrawCost, reason: p.ink >= CONFIG.ink.minDrawCost ? undefined : 'ink' };
+      if (msg.m === 'weapon') return { ok: switchWeapon(p, msg.weapon), weapon: p.weapon };
+      if (msg.m === 'perk') return applyPerk(match, id, msg.perkId);
+      if (msg.m === 'drawStart') {
+        const ok = p.ink >= CONFIG.ink.minDrawCost * perkMods(p).drawCostMul;
+        return { ok, reason: ok ? undefined : 'ink' };
+      }
       if (msg.m === 'drawEnd') return applyDraw(match, id, { x: msg.ax, z: msg.az }, { x: msg.bx, z: msg.bz });
       if (msg.m === 'erase') return applyErase(match, id);
       if (msg.m === 'fold') return applyFold(match, id, msg.foldId);
+      if (msg.m === 'god') {
+        p.god = !!msg.on;
+        return { ok: true, god: p.god };
+      }
       return { ok: false, reason: 'unknown' };
     },
     // nowMs 单调时钟；返回本帧推进的步数
@@ -52,6 +62,7 @@ export function createRuntime({ seed = 1, playerIds = [0], onSnapshot = null } =
       acc += delta;
       let steps = 0;
       while (acc >= CONFIG.net.dt && steps < CONFIG.net.catchupMax) {
+        if (onBeforeStep) onBeforeStep(match, steps);
         stepMatch(match, inputs);
         acc -= CONFIG.net.dt;
         steps++;
@@ -59,6 +70,10 @@ export function createRuntime({ seed = 1, playerIds = [0], onSnapshot = null } =
       if (acc >= CONFIG.net.dt) acc = 0;
       if (steps > 0 && onSnapshot) onSnapshot(snapshot(match));
       return steps;
+    },
+    // 帧间插值权重：0..1 的 20Hz 步进余量（表现层专用，不影响权威模拟）
+    alpha() {
+      return Math.max(0, Math.min(1, acc / CONFIG.net.dt));
     },
     snapshot() { return snapshot(match); },
     // 手动单步（无头回归 / 浏览器确定性验收用，绕过累积器时钟）

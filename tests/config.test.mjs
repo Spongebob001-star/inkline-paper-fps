@@ -13,7 +13,8 @@ test('玩家基础数值（规格 §3.2）', () => {
   assert.equal(p.maxHp, 100);
   assert.equal(p.walkSpeed, 4.8);
   assert.equal(p.sprintSpeed, 7);
-  assert.equal(p.jumpVelocity, 6.2);
+  assert.equal(p.jumpVelocity, 6.8);
+  assert.deepEqual(p.dash, { speed: 17.5, duration: 0.18, cooldown: 2.2 });
   assert.equal(p.gravity, 20);
   assert.equal(p.crawlSpeed, 0.6);
 });
@@ -90,12 +91,12 @@ test('橡皮 / 纸飞机数值（规格 §3.10–3.11）', () => {
   assert.equal(pl.climbTime, 0.6);
 });
 
-test('人数缩放全表（规格 §3.16，n=1..4）', () => {
+test('人数缩放全表（规格 §3.16 + 重铸包 2 Boss 基线，n=1..4）', () => {
   const s = CONFIG.scaling;
-  assert.deepEqual(s[1], { initial: 4, reinforce: 3, cap: 9, hpMul: 1.0, bossHp: 480, fan: 7 });
-  assert.deepEqual(s[2], { initial: 6, reinforce: 4, cap: 12, hpMul: 1.55, bossHp: 744, fan: 8 });
-  assert.deepEqual(s[3], { initial: 8, reinforce: 5, cap: 14, hpMul: 2.1, bossHp: 1008, fan: 9 });
-  assert.deepEqual(s[4], { initial: 10, reinforce: 6, cap: 16, hpMul: 2.6, bossHp: 1272, fan: 10 });
+  assert.deepEqual(s[1], { initial: 4, reinforce: 3, cap: 9, hpMul: 1.0, bossHp: 1100, fan: 7 });
+  assert.deepEqual(s[2], { initial: 6, reinforce: 4, cap: 12, hpMul: 1.55, bossHp: 1650, fan: 8 });
+  assert.deepEqual(s[3], { initial: 8, reinforce: 5, cap: 14, hpMul: 2.1, bossHp: 2200, fan: 9 });
+  assert.deepEqual(s[4], { initial: 10, reinforce: 6, cap: 16, hpMul: 2.6, bossHp: 2750, fan: 10 });
   assert.deepEqual(s.spawn, { minDist: 3.5, landAnim: 0.35, attackBuffer: 1.5 });
 });
 
@@ -119,29 +120,35 @@ test('拾取物：墨水×3 + 胶带×3（含规格修正的第三处 (0,10)）'
   assert.equal(CONFIG.pickups.radius, 1);
 });
 
-test('Boss：护盾 ceil(dmg×0.35)、狂暴阈值 50%、仇恨窗 5s', () => {
+test('Boss：三阶段基线 1100HP / 护盾 0.40→0.72→1.0 / 65%·30% 刻度', () => {
   const b = CONFIG.boss;
-  assert.equal(b.hp, 480);
-  assert.equal(b.shieldMul, 0.35);
-  assert.equal(b.speed, 1.8);
-  assert.equal(b.attackInterval, 1.7);
+  assert.equal(b.hp, 1100);
+  assert.equal(b.shieldMul, 0.4);
+  assert.equal(b.speed, 2.4);
+  assert.equal(b.attackInterval, 1.35);
   assert.equal(b.fanCount, 7);
-  assert.equal(b.fanSpeed, 8);
-  assert.equal(b.fanTelegraph, 0.6);
+  assert.equal(b.fanSpeed, 11);
+  assert.equal(b.fanTelegraph, 0.5);
   assert.equal(b.summonTelegraph, 0.8);
   assert.equal(b.summonCount, 3);
   assert.equal(b.summonCountBig, 4);
-  assert.equal(b.chargeTelegraph, 0.7);
-  assert.equal(b.chargeSpeed, 14);
+  assert.equal(b.chargeTelegraph, 0.45);
+  assert.equal(b.chargeSpeed, 16.5);
   assert.equal(b.chargeTime, 1.1);
-  assert.equal(b.chargeDamage, 18);
+  assert.equal(b.chargeDamage, 22);
   assert.equal(b.chargeWallDamage, 45);
   assert.equal(b.hateWindow, 5);
-  assert.equal(b.rage.at, 0.5);
-  assert.equal(b.rage.attackInterval, 1.15);
-  assert.equal(b.rage.speed, 2.4);
-  assert.equal(b.rage.fanSpeed, 9.5);
-  assert.equal(Math.ceil(24 * b.shieldMul), 9); // 护甲期每发实际扣血
+  assert.equal(b.waveJumpHeight, 0.55);
+  assert.equal(b.phase2At, 0.65);
+  assert.equal(b.phase3At, 0.3);
+  assert.deepEqual(b.phases.map(p => p.shieldMul), [0.4, 0.72, 1]);
+  assert.deepEqual(b.phases.map(p => p.chargeSegments), [1, 2, 3]);
+  assert.deepEqual(b.phases.map(p => p.mortars), [4, 6, 8]);
+  assert.equal(b.rage.at, 0.65);
+  assert.equal(b.rage.attackInterval, 0.95);
+  assert.equal(b.rage.speed, 3.1);
+  assert.equal(b.rage.fanSpeed, 13);
+  assert.equal(Math.ceil(24 * b.shieldMul), 10); // 护盾期每发实际扣血
 });
 
 test('锚点：单人 2.2s / 共持 1.1s / 衰减 3× / 撤离按住 2s（规格修正）', () => {

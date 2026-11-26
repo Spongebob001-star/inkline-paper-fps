@@ -7,12 +7,15 @@ import { losBlocker, fireProjectile, damageWall, damagePlayer } from './combat.m
 export function createEnemy(match, type, x, z, opts = {}) {
   const rand = match.rand;
   const spec = type === 'eraser' ? CONFIG.enemy.eraser : type === 'plane' ? CONFIG.enemy.plane : null;
+  // 人数缩放（规格 §3.9）：敌人生命 ×1.0/1.55/2.1/2.6，生成时应用；护甲不变。
+  const n = Math.min(4, Math.max(1, match.players.length));
+  const hpMul = CONFIG.scaling[n].hpMul;
   const e = {
     id: match.nextId++,
     type,
     x, z,
     y: type === 'plane' ? CONFIG.enemy.plane.height : 0,
-    hp: spec ? spec.hp : CONFIG.enemy.hp,
+    hp: Math.round((spec ? spec.hp : CONFIG.enemy.hp) * hpMul),
     armor: type === 'crane' ? CONFIG.enemy.armor : 0,
     attackCd: opts.attackCd ?? 0.7 + rand(),
     telegraph: 0, stun: 0, slow: 0,
@@ -161,7 +164,7 @@ function stepEraser(match, e, dt) {
     const d = Math.max(0.001, Math.hypot(dx, dz));
     if (d > 0.95) { mx = dx / d; mz = dz / d; }
     else if (canAct && e.attackCd <= 0) {
-      damagePlayer(match, p, S.biteDamage);
+      damagePlayer(match, p, S.biteDamage, { x: e.x, z: e.z });
       e.attackCd = S.biteCooldown;
       match.events.push({ type: 'bite', data: { id: e.id, playerId: p.id } });
     }
@@ -212,7 +215,7 @@ function stepPlane(match, e, dt) {
     const pd = Math.hypot(p.pos.x - e.x, p.pos.z - e.z);
     const band = Math.abs(e.y - (p.pos.y - 0.35)) < 0.8;
     if (pd < 0.6 && band) {
-      damagePlayer(match, p, S.diveDamage);
+      damagePlayer(match, p, S.diveDamage, { x: e.x, z: e.z });
       e.state = 'climb';
       e.diveT = 0;
     } else if (e.diveT >= S.diveTime) {
